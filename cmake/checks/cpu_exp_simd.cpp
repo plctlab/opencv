@@ -2,10 +2,10 @@
 
 #if __cplusplus >= 201703L && __has_include(<experimental/simd>)
 #  include <experimental/simd>
-#  define CV_SIMD 1
+#  define CV_EXP_SIMD 1
 #endif
 
-#if defined CV_SIMD
+#if defined CV_EXP_SIMD
 int test()
 {
     namespace stdx = std::experimental;

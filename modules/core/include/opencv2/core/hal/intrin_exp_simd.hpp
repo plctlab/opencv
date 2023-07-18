@@ -44,7 +44,7 @@ struct VTraits;
 
 template <class TYPE>
 struct VTraits<stdx::native_simd<TYPE>> {
-    static inline int vlanes() { return stdx::native_simd<TYPE>::size(); }
+    static constexpr inline int vlanes() { return stdx::native_simd<TYPE>::size(); }
     using lane_type = TYPE;
     enum { nlanes = vlanes(), max_nlanes = vlanes() };
 };
@@ -86,7 +86,7 @@ inline auto v_load_aligned(const T* ptr) {
 template<typename T>
 inline auto v_load_low(const T* ptr) {
     stdx::native_simd<T> c;
-    for (int i = 0; i < c.size() / 2; ++i) {
+    for (size_t i = 0; i < c.size() / 2; ++i) {
         c[i] = ptr[i];
     }
     return c;
@@ -95,7 +95,7 @@ inline auto v_load_low(const T* ptr) {
 template<typename T>
 inline auto v_load_halves(const T* loptr, const T* hiptr) {
     stdx::native_simd<T> c;
-    for (int i = 0; i < c.size() / 2; ++i) {
+    for (size_t i = 0; i < c.size() / 2; ++i) {
         c[i] = loptr[i];
         c[i + c.size() / 2] = hiptr[i];
     }

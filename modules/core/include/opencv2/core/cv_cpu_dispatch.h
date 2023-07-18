@@ -187,8 +187,8 @@
 #  include <riscv_vector.h>
 #endif
 
-#if defined CV_CPU_COMPILE_SIMD
-#  define CV_SIMD 1
+#if defined CV_CPU_COMPILE_EXP_SIMD
+#  define CV_EXP_SIMD 1
 #  include <experimental/simd>
 #endif
 
@@ -385,6 +385,6 @@ struct VZeroUpperGuard {
 #  define CV_LASX 0
 #endif
 
-#ifndef CV_SIMD
-#  define CV_SIMD 0
+#ifndef CV_EXP_SIMD
+#  define CV_EXP_SIMD 0
 #endif

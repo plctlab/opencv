@@ -438,7 +438,7 @@ struct HWFeatures
 
         g_hwFeatureNames[CPU_LASX] = "LASX";
 
-        g_hwFeatureNames[CPU_SIMD] = "SIMD";
+        g_hwFeatureNames[CPU_EXP_SIMD] = "EXP_SIMD";
     }
 
     void initialize(void)
@@ -707,7 +707,7 @@ struct HWFeatures
     #endif
 
     #if __cplusplus >= 201703L && __has_include(<experimental/simd>)
-        have[CV_CPU_SIMD] = true;
+        have[CV_CPU_EXP_SIMD] = true;
     #endif
 
         bool skip_baseline_check = false;

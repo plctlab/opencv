@@ -546,5 +546,26 @@
 #endif
 #define __CV_CPU_DISPATCH_CHAIN_LASX(fn, args, mode, ...)  CV_CPU_CALL_LASX(fn, args); __CV_EXPAND(__CV_CPU_DISPATCH_CHAIN_ ## mode(fn, args, __VA_ARGS__))
 
+#if !defined CV_DISABLE_OPTIMIZATION && defined CV_ENABLE_INTRINSICS && defined CV_CPU_COMPILE_SIMD
+#  define CV_TRY_SIMD 1
+#  define CV_CPU_FORCE_SIMD 1
+#  define CV_CPU_HAS_SUPPORT_SIMD 1
+#  define CV_CPU_CALL_SIMD(fn, args) return (cpu_baseline::fn args)
+#  define CV_CPU_CALL_SIMD_(fn, args) return (opt_SIMD::fn args)
+#elif !defined CV_DISABLE_OPTIMIZATION && defined CV_ENABLE_INTRINSICS && defined CV_CPU_DISPATCH_COMPILE_SIMD
+#  define CV_TRY_SIMD 1
+#  define CV_CPU_FORCE_SIMD 0
+#  define CV_CPU_HAS_SUPPORT_SIMD (cv::checkHardwareSupport(CV_CPU_SIMD))
+#  define CV_CPU_CALL_SIMD(fn, args) if (CV_CPU_HAS_SUPPORT_SIMD) return (opt_SIMD::fn args)
+#  define CV_CPU_CALL_SIMD_(fn, args) if (CV_CPU_HAS_SUPPORT_SIMD) return (opt_SIMD::fn args)
+#else
+#  define CV_TRY_SIMD 0
+#  define CV_CPU_FORCE_SIMD 0
+#  define CV_CPU_HAS_SUPPORT_SIMD 0
+#  define CV_CPU_CALL_SIMD(fn, args)
+#  define CV_CPU_CALL_SIMD_(fn, args)
+#endif
+#define __CV_CPU_DISPATCH_CHAIN_SIMD(fn, args, mode, ...)  CV_CPU_CALL_SIMD(fn, args); __CV_EXPAND(__CV_CPU_DISPATCH_CHAIN_ ## mode(fn, args, __VA_ARGS__))
+
 #define CV_CPU_CALL_BASELINE(fn, args) return (cpu_baseline::fn args)
 #define __CV_CPU_DISPATCH_CHAIN_BASELINE(fn, args, mode, ...)  CV_CPU_CALL_BASELINE(fn, args) /* last in sequence */

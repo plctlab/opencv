@@ -700,9 +700,9 @@ inline auto v_rotate_left(const stdx::native_simd<T>& a, const stdx::native_simd
     return stdx::native_simd<T>([&](int i) {
         const int n = a.size();
         int aIndex = i - s;
-        int bIndex = i - s + (int)a.size();
-        if (0 <= aIndex && aIndex <= n) return a[aIndex];
-        else if (0 <= bIndex && bIndex <= n) return b[bIndex];
+        int bIndex = i - s + n;
+        if (0 <= aIndex && aIndex < n) return a[aIndex];
+        else if (0 <= bIndex && bIndex < n) return b[bIndex];
         else return T(0);
     });
 }
@@ -712,9 +712,9 @@ inline auto v_rotate_right(const stdx::native_simd<T>& a, const stdx::native_sim
     return stdx::native_simd<T>([&](int i) {
         const int n = a.size();
         int aIndex = i + s;
-        int bIndex = i + s - (int)a.size();
-        if (0 <= aIndex && aIndex <= n) return a[aIndex];
-        else if (0 <= bIndex && bIndex <= n) return b[bIndex];
+        int bIndex = i + s - n;
+        if (0 <= aIndex && aIndex < n) return a[aIndex];
+        else if (0 <= bIndex && bIndex < n) return b[bIndex];
         else return T(0);
     });
 }

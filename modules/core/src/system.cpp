@@ -42,6 +42,7 @@
 //M*/
 
 #include "precomp.hpp"
+#include <atomic>
 #include <iostream>
 #include <ostream>
 
@@ -57,18 +58,6 @@
 
 #include <opencv2/core/utils/fp_control_utils.hpp>
 #include <opencv2/core/utils/fp_control.private.hpp>
-
-#ifndef OPENCV_WITH_THREAD_SANITIZER
-  #if defined(__clang__) && defined(__has_feature)
-  #if __has_feature(thread_sanitizer)
-      #define OPENCV_WITH_THREAD_SANITIZER 1
-      #include <atomic>  // assume C++11
-  #endif
-  #endif
-#endif
-#ifndef OPENCV_WITH_THREAD_SANITIZER
-    #define OPENCV_WITH_THREAD_SANITIZER 0
-#endif
 
 namespace cv {
 
@@ -1545,11 +1534,7 @@ private:
 #endif
 #else // _WIN32
     pthread_key_t  tlsKey;
-#if OPENCV_WITH_THREAD_SANITIZER
     std::atomic<bool> disposed;
-#else
-    bool disposed;
-#endif
 #endif
 };
 
@@ -2595,7 +2580,7 @@ public:
         ippStatus = ippGetCpuFeatures(&cpuFeatures, NULL);
         if(ippStatus < 0)
         {
-            std::cerr << "ERROR: IPP cannot detect CPU features, IPP was disabled " << std::endl;
+            CV_LOG_ERROR(NULL, "ERROR: IPP cannot detect CPU features, IPP was disabled");
             useIPP = false;
             return;
         }
@@ -2633,7 +2618,7 @@ public:
 
             if(env == "disabled")
             {
-                std::cerr << "WARNING: IPP was disabled by OPENCV_IPP environment variable" << std::endl;
+                CV_LOG_WARNING(NULL, "WARNING: IPP was disabled by OPENCV_IPP environment variable");
                 useIPP = false;
             }
             else if(env == "sse42")
@@ -2647,7 +2632,7 @@ public:
 #endif
 #endif
             else
-                std::cerr << "ERROR: Improper value of OPENCV_IPP: " << env.c_str() << ". Correct values are: disabled, sse42, avx2, avx512 (Intel64 only)" << std::endl;
+                CV_LOG_ERROR(NULL, "ERROR: Improper value of OPENCV_IPP: " << env.c_str() << ". Correct values are: disabled, sse42, avx2, avx512 (Intel64 only)");
 
             // Trim unsupported features
             ippFeatures &= cpuFeatures;

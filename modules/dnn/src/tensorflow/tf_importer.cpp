@@ -36,7 +36,7 @@ CV__DNN_INLINE_NS_BEGIN
 
 extern bool DNN_DIAGNOSTICS_RUN;
 
-#if HAVE_PROTOBUF
+#ifdef HAVE_PROTOBUF
 
 using ::google::protobuf::RepeatedField;
 using ::google::protobuf::RepeatedPtrField;
@@ -589,6 +589,7 @@ private:
     void parsePack               (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
     void parseClipByValue        (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
     void parseLeakyRelu          (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
+    void parsePReLU              (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
     void parseActivation         (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
     void parseExpandDims         (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
     void parseSquare             (tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams);
@@ -668,6 +669,7 @@ TFImporter::DispatchMap TFImporter::buildDispatchMap()
     dispatch["Pack"] = &TFImporter::parsePack;
     dispatch["ClipByValue"] = &TFImporter::parseClipByValue;
     dispatch["LeakyRelu"] = &TFImporter::parseLeakyRelu;
+    dispatch["PReLU"] = &TFImporter::parsePReLU;
     dispatch["Abs"] = dispatch["Tanh"] = dispatch["Sigmoid"] = dispatch["Relu"] =
             dispatch["Elu"] = dispatch["Exp"] = dispatch["Identity"] = dispatch["Relu6"] = &TFImporter::parseActivation;
     dispatch["ExpandDims"] = &TFImporter::parseExpandDims;
@@ -2622,6 +2624,27 @@ void TFImporter::parseLeakyRelu(tensorflow::GraphDef& net, const tensorflow::Nod
     connectToAllBlobs(layer_id, dstNet, parsePin(layer.input(0)), id, num_inputs);
 }
 
+void TFImporter::parsePReLU(tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams)
+{
+    const std::string& name = layer.name();
+
+    Mat scales;
+    blobFromTensor(getConstBlob(layer, value_id, 1), scales);
+
+    layerParams.blobs.resize(1);
+
+    if (scales.dims == 3) {
+        // Considering scales from Keras wih HWC layout;
+        transposeND(scales, {2, 0, 1}, layerParams.blobs[0]);
+    } else {
+        layerParams.blobs[0] = scales;
+    }
+
+    int id = dstNet.addLayer(name, "PReLU", layerParams);
+    layer_id[name] = id;
+    connect(layer_id, dstNet, parsePin(layer.input(0)), id, 0);
+}
+
 // "Abs" "Tanh" "Sigmoid" "Relu" "Elu" "Exp" "Identity" "Relu6"
 void TFImporter::parseActivation(tensorflow::GraphDef& net, const tensorflow::NodeDef& layer, LayerParams& layerParams)
 {
@@ -3225,8 +3248,6 @@ void TFLayerHandler::handleFailed(const tensorflow::NodeDef& layer)
 
 } // namespace
 
-#endif //HAVE_PROTOBUF
-
 Net readNetFromTensorflow(const String &model, const String &config)
 {
     return detail::readNetDiagnostic<TFImporter>(model.c_str(), config.c_str());
@@ -3275,6 +3296,28 @@ void writeTextGraph(const String& _model, const String& output)
     ofs << content;
     ofs.close();
 }
+
+#else  // HAVE_PROTOBUF
+
+#define DNN_PROTOBUF_UNSUPPORTED() CV_Error(Error::StsError, "DNN/TF: Build OpenCV with Protobuf to import TensorFlow models")
+
+Net readNetFromTensorflow(const String &, const String &) {
+    DNN_PROTOBUF_UNSUPPORTED();
+}
+
+Net readNetFromTensorflow(const char*, size_t, const char*, size_t) {
+    DNN_PROTOBUF_UNSUPPORTED();
+}
+
+Net readNetFromTensorflow(const std::vector<uchar>&, const std::vector<uchar>&) {
+    DNN_PROTOBUF_UNSUPPORTED();
+}
+
+void writeTextGraph(const String& _model, const String& output) {
+    DNN_PROTOBUF_UNSUPPORTED();
+}
+
+#endif  // HAVE_PROTOBUF
 
 CV__DNN_INLINE_NS_END
 }} // namespace

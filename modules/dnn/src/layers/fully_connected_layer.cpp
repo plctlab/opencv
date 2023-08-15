@@ -48,6 +48,7 @@
 #include "../ie_ngraph.hpp"
 #include "../op_webnn.hpp"
 #include "../op_cann.hpp"
+#include "../op_vkcom.hpp"
 
 #include <opencv2/dnn/shape_utils.hpp>
 
@@ -179,15 +180,13 @@ public:
     virtual bool supportBackend(int backendId) CV_OVERRIDE
     {
         bool tranAorB = transA || transB;
-#ifdef HAVE_INF_ENGINE
-        if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
-            return axis == 1 && !tranAorB;
-#endif
         return backendId == DNN_BACKEND_OPENCV ||
                backendId == DNN_BACKEND_CUDA ||
                (backendId == DNN_BACKEND_HALIDE && haveHalide() && axis == 1 && !tranAorB) ||
                (backendId == DNN_BACKEND_WEBNN && axis == 1 && !tranAorB) ||
-               backendId == DNN_BACKEND_CANN;;
+               backendId == DNN_BACKEND_CANN ||
+               backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH ||
+               (backendId == DNN_BACKEND_VKCOM && haveVulkan() && !tranAorB);
     }
 
     virtual bool setActivation(const Ptr<ActivationLayer>& layer) CV_OVERRIDE
@@ -628,14 +627,82 @@ public:
 
             if(input_wrapper->getRank() == inp2Dim)
                 return make_cuda_node<cuda4dnn::MatMulOp>(preferableTarget, std::move(context->stream), std::move(context->cublas_handle), oriMat, biasMat_, transA, transB);
-            else
+            else {
+                CV_LOG_INFO(NULL, "DNN/CUDA: no implementation for MatMul with rank " << input_wrapper->getRank());
                 return Ptr<BackendNode>();
+            }
         }
 
         auto flatten_start_axis = normalize_axis(axis, input_wrapper->getRank());
         return make_cuda_node<cuda4dnn::InnerProductOp>(preferableTarget, std::move(context->stream), std::move(context->cublas_handle), flatten_start_axis, weightsMat, biasMat_);
     }
 #endif
+
+#ifdef HAVE_VULKAN
+    virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> > &inputs,
+                                       std::vector<Ptr<BackendWrapper> > &outputs) CV_OVERRIDE
+    {
+        auto biasMat_ = bias ? biasMat : Mat();
+        auto input_wrapper = inputs[0].dynamicCast<VkComBackendWrapper>();
+
+        CV_Assert((inputs.size() == 2 || inputs.size() == 1) && outputs.size() == 1);
+        std::vector<Mat> vkBlobs;
+        Ptr<vkcom::OpBase> op;
+
+        if (!biasMat_.empty() || !activ.empty())
+        {
+            return Ptr<BackendNode>();
+        }
+
+        Ptr<VkComBackendWrapper> outputWrap = outputs[0].dynamicCast<VkComBackendWrapper>();
+        CV_Assert(outputWrap);
+        // TODO: Currently, we only support the 2D MatMul. Need support the FC layer and bias case in the future.
+
+        if (inputs.size() == 2)
+        {
+            Ptr<VkComBackendWrapper> inputWrap0 = inputs[0].dynamicCast<VkComBackendWrapper>();
+            Ptr<VkComBackendWrapper> inputWrap1 = inputs[1].dynamicCast<VkComBackendWrapper>();
+            CV_Assert(inputWrap0 && inputWrap1);
+
+            MatShape inpShape0 = shape(*inputWrap0->getMat());
+            MatShape inpShape1 = shape(*inputWrap1->getMat());
+            MatShape outShape = shape(*outputWrap->getMat());
+
+            // TODO Currently, vulkan only support 2D matmul. Try to support 3D and 4D matmul.
+            if (inpShape0.size() != 2 || inpShape1.size() != 2)
+                return Ptr<BackendNode>();
+
+            op = (new vkcom::OpMatMul(vkBlobs, inpShape0[0], inpShape0[1], outShape[1]));
+        }
+        else
+        {
+            CV_Assert(!weightsMat.empty());
+            Mat wm;
+            weightsMat.copyTo(wm); // to handle the case of isContinuous() == false
+            wm = wm.reshape(1, blobs[0].dims, blobs[0].size);
+            vkBlobs.push_back(wm.t());
+
+            Ptr<VkComBackendWrapper> inputWrap = inputs[0].dynamicCast<VkComBackendWrapper>();
+            CV_Assert(inputWrap);
+
+            MatShape inpShape = shape(*inputWrap->getMat());
+            MatShape outShape = shape(*outputWrap->getMat());
+            MatShape wShape = shape(weightsMat);
+
+            // TODO Currently, vulkan only support 2D matmul. Try to support 3D and 4D matmul.
+            if (inpShape.size() != 2 || wShape.size() != 2)
+                return Ptr<BackendNode>();
+
+            // TODO: Currently, only focus on 2D MatMul.
+            CV_Assert(inpShape.size() == 2 && outShape.size() == 2 && wShape.size() == 2);
+            CV_Assert(inpShape[1] == outShape[0]);
+            op = (new vkcom::OpMatMul(vkBlobs, inpShape[0], inpShape[1], outShape[1]));
+        }
+
+        return Ptr<BackendNode>(new VkComBackendNode(inputs, op, outputs));
+    }
+#endif
+
 
     virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
     {
@@ -732,17 +799,26 @@ public:
         if (nodes.size() == 2)
         {
             auto& inp2 = nodes[1].dynamicCast<InfEngineNgraphNode>()->node;
-            matmul = std::make_shared<ngraph::op::MatMul>(ieInpNode, inp2, false, false);
+            matmul = std::make_shared<ngraph::op::MatMul>(ieInpNode, inp2, transA, transB);
         }
         else
         {
-            std::vector<int64_t> data = {(int64_t)ieInpNode->get_shape()[0], (int64_t)blobs[0].size[1]};
-            auto new_shape = std::make_shared<ngraph::op::Constant>(ngraph::element::i64, ngraph::Shape{2}, data.data());
-            auto inp = std::make_shared<ngraph::op::v1::Reshape>(ieInpNode, new_shape, true);
+            std::vector<int> shape(1 + normalize_axis(axis, ieInpNode->get_shape().size()), 0);
+            shape[shape.size() - 1] = -1;
+            auto inp = std::make_shared<ngraph::op::v1::Reshape>(
+                ieInpNode,
+                std::make_shared<ngraph::op::Constant>(ngraph::element::i32, ngraph::Shape{shape.size()}, shape.data()),
+                true
+            );
 
-            std::vector<size_t> weight_shape{(size_t)blobs[0].size[0], (size_t)blobs[0].size[1]};
+            std::vector<size_t> weight_shape;
+            if (isMatMul) {
+                weight_shape = getShape<size_t>(oriMat);
+            } else {
+                weight_shape = {(size_t)blobs[0].size[0], (size_t)blobs[0].size[1]};
+            }
             auto ieWeights = std::make_shared<ngraph::op::Constant>(ngraph::element::f32, weight_shape, blobs[0].data);
-            matmul = std::make_shared<ngraph::op::MatMul>(inp, ieWeights, false, true);
+            matmul = std::make_shared<ngraph::op::MatMul>(inp, ieWeights, transA, transB);
         }
 
         if (bias) {
@@ -844,15 +920,27 @@ public:
     {
         CV_UNUSED(inputs); // suppress unused variable warning
         long flops = 0;
+        int innerSize = 0;
 
-        int innerSize = blobs[0].size[1];
+        if (!blobs.empty())
+        {
+            innerSize = blobs[0].size[1];
+        }
+        else
+        {
+            CV_Assert(inputs.size() == 2);
+            if (transB)
+                innerSize = inputs[1][1];
+            else
+                innerSize = inputs[1][0];
+        }
+
         for(int i = 0; i < outputs.size(); i++)
         {
             flops += CV_BIG_INT(3)*innerSize*total(outputs[i]);
         }
 
         return flops;
-
     }
 
     bool bias;

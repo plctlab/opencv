@@ -142,6 +142,20 @@ class Bindings(NewOpenCVTests):
         with self.assertRaises(AttributeError):
             obj.except_ = 32
 
+    def test_maketype(self):
+        data = {
+            cv.CV_8UC3: [cv.CV_8U, 3, cv.CV_8UC],
+            cv.CV_16SC1: [cv.CV_16S, 1, cv.CV_16SC],
+            cv.CV_32FC4: [cv.CV_32F, 4, cv.CV_32FC],
+            cv.CV_64FC2: [cv.CV_64F, 2, cv.CV_64FC],
+            cv.CV_8SC4: [cv.CV_8S, 4, cv.CV_8SC],
+            cv.CV_16UC2: [cv.CV_16U, 2, cv.CV_16UC],
+            cv.CV_32SC1: [cv.CV_32S, 1, cv.CV_32SC],
+            cv.CV_16FC3: [cv.CV_16F, 3, cv.CV_16FC],
+        }
+        for ref, (depth, channels, func) in data.items():
+            self.assertEqual(ref, cv.CV_MAKETYPE(depth, channels))
+            self.assertEqual(ref, func(channels))
 
 
 class Arguments(NewOpenCVTests):
@@ -204,6 +218,25 @@ class Arguments(NewOpenCVTests):
         #a = np.zeros((2,3,4,5), dtype='f')
         #res6 = cv.utils.dumpInputArray([a, b])
         #self.assertEqual(res6, "InputArrayOfArrays: empty()=false kind=0x00050000 flags=0x01050000 total(-1)=2 dims(-1)=1 size(-1)=2x1 type(0)=CV_32FC1 dims(0)=4 size(0)=[2 3 4 5]")
+
+    def test_unsupported_numpy_data_types_string_description(self):
+        for dtype in (object, str, np.complex128):
+            test_array = np.zeros((4, 4, 3), dtype=dtype)
+            msg = ".*type = {} is not supported".format(test_array.dtype)
+            if sys.version_info[0] < 3:
+                self.assertRaisesRegexp(
+                    Exception, msg, cv.utils.dumpInputArray, test_array
+                )
+            else:
+                self.assertRaisesRegex(
+                    Exception, msg, cv.utils.dumpInputArray, test_array
+                )
+
+    def test_numpy_writeable_flag_is_preserved(self):
+        array = np.zeros((10, 10, 1), dtype=np.uint8)
+        array.setflags(write=False)
+        with self.assertRaises(Exception):
+            cv.rectangle(array, (0, 0), (5, 5), (255), 2)
 
     def test_20968(self):
         pixel = np.uint8([[[40, 50, 200]]])
@@ -467,6 +500,27 @@ class Arguments(NewOpenCVTests):
             actual = try_to_convert(convertible)
             self.assertEqual(expected, actual,
                              msg=get_conversion_error_msg(convertible, expected, actual))
+
+
+    def test_wrap_rotated_rect(self):
+        center = (34.5, 52.)
+        size = (565.0, 140.0)
+        angle = -177.5
+        rect1 = cv.RotatedRect(center, size, angle)
+        self.assertEqual(rect1.center, center)
+        self.assertEqual(rect1.size, size)
+        self.assertEqual(rect1.angle, angle)
+
+        pts = [[ 319.7845, -5.6109037],
+               [ 313.6778, 134.25586],
+               [-250.78448, 109.6109],
+               [-244.6778, -30.25586]]
+        self.assertLess(np.max(np.abs(rect1.points() - pts)), 1e-4)
+
+        rect2 = cv.RotatedRect(pts[0], pts[1], pts[2])
+        _, inter_pts = cv.rotatedRectangleIntersection(rect1, rect2)
+        self.assertLess(np.max(np.abs(inter_pts.reshape(-1, 2) - pts)), 1e-4)
+
 
     def test_parse_to_rotated_rect_not_convertible(self):
         for not_convertible in ([], (), np.array([]), (123, (45, 34), 1), {1: 2, 3: 4}, 123,

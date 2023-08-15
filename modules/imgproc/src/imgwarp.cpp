@@ -757,10 +757,34 @@ static void remapBilinear( const Mat& _src, Mat& _dst, const Mat& _xy,
             }
             else
             {
-                if( borderType == BORDER_TRANSPARENT && cn != 3 )
-                {
-                    D += (X1 - dx)*cn;
-                    dx = X1;
+                if (borderType == BORDER_TRANSPARENT) {
+                    for (; dx < X1; dx++, D += cn) {
+                        if (dx >= dsize.width) continue;
+                        const int sx = XY[dx * 2], sy = XY[dx * 2 + 1];
+                        // If the mapped point is still within bounds, it did not get computed
+                        // because it lacked 4 neighbors. Still, it can be computed with an
+                        // approximate formula. If it is outside, the point is left untouched.
+                        if (sx >= 0 && sx <= ssize.width - 1 && sy >= 0 && sy <= ssize.height - 1) {
+                            const AT* w = wtab + FXY[dx] * 4;
+                            WT w_tot = 0;
+                            if (sx >= 0 && sy >= 0) w_tot += w[0];
+                            if (sy >= 0 && sx < ssize.width - 1) w_tot += w[1];
+                            if (sx >= 0 && sy < ssize.height - 1) w_tot += w[2];
+                            if (sx < ssize.width - 1 && sy < ssize.height - 1) w_tot += w[3];
+                            if (w_tot == 0.f) continue;
+                            const WT w_tot_ini = (WT)w[0] + w[1] + w[2] + w[3];
+                            const T* S = S0 + sy * sstep + sx * cn;
+                            for (int k = 0; k < cn; k++) {
+                                WT t0 = 0;
+                                if (sx >= 0 && sy >= 0) t0 += S[k] * w[0];
+                                if (sy >= 0 && sx < ssize.width - 1) t0 += S[k + cn] * w[1];
+                                if (sx >= 0 && sy < ssize.height - 1) t0 += S[sstep + k] * w[2];
+                                if (sx < ssize.width - 1 && sy < ssize.height - 1) t0 += S[sstep + k + cn] * w[3];
+                                t0 = (WT)(t0 * (float)w_tot_ini / w_tot);
+                                D[k] = castOp(t0);
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -831,10 +855,6 @@ static void remapBilinear( const Mat& _src, Mat& _dst, const Mat& _xy,
                                 v2 = S0 + sy1*sstep + sx0*cn;
                                 v3 = S0 + sy1*sstep + sx1*cn;
                             }
-                            else if( borderType == BORDER_TRANSPARENT &&
-                                ((unsigned)sx >= (unsigned)(ssize.width-1) ||
-                                (unsigned)sy >= (unsigned)(ssize.height-1)))
-                                continue;
                             else
                             {
                                 sx0 = borderInterpolate(sx, ssize.width, borderType);
@@ -1346,9 +1366,9 @@ static bool ocl_remap(InputArray _src, OutputArray _dst, InputArray _map1, Input
                       + format(" -D WT=%s -D convertToT=%s -D convertToWT=%s"
                                " -D convertToWT2=%s -D WT2=%s",
                                ocl::typeToStr(CV_MAKE_TYPE(wdepth, cn)),
-                               ocl::convertTypeStr(wdepth, depth, cn, cvt[0]),
-                               ocl::convertTypeStr(depth, wdepth, cn, cvt[1]),
-                               ocl::convertTypeStr(CV_32S, wdepth, 2, cvt[2]),
+                               ocl::convertTypeStr(wdepth, depth, cn, cvt[0], sizeof(cvt[0])),
+                               ocl::convertTypeStr(depth, wdepth, cn, cvt[1], sizeof(cvt[1])),
+                               ocl::convertTypeStr(CV_32S, wdepth, 2, cvt[2], sizeof(cvt[2])),
                                ocl::typeToStr(CV_MAKE_TYPE(wdepth, 2)));
     }
     int scalarcn = cn == 3 ? 4 : cn;
@@ -2490,8 +2510,8 @@ static bool ocl_warpTransform(InputArray _src, OutputArray _dst, InputArray _M0,
                       ocl::typeToStr(CV_MAT_DEPTH(type)),
                       ocl::typeToStr(sctype),
                       ocl::typeToStr(CV_MAKE_TYPE(wdepth, cn)), depth,
-                      ocl::convertTypeStr(depth, wdepth, cn, cvt[0]),
-                      ocl::convertTypeStr(wdepth, depth, cn, cvt[1]),
+                      ocl::convertTypeStr(depth, wdepth, cn, cvt[0], sizeof(cvt[0])),
+                      ocl::convertTypeStr(wdepth, depth, cn, cvt[1], sizeof(cvt[1])),
                       doubleSupport ? " -D DOUBLE_SUPPORT" : "",
                       useDouble ? "double" : "float",
                       cn, rowsPerWI);

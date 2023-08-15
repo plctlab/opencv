@@ -138,7 +138,7 @@ public:
             {
                 const float* srcptr = src_->ptr<float>(i) + stripeStart;
                 float* dstptr = dst_->ptr<float>(i) + stripeStart;
-                func_->apply(srcptr, dstptr, (int)(stripeEnd - stripeStart), planeSize, 0, outCn);
+                func_->apply(srcptr, dstptr, stripeStart, (int)(stripeEnd - stripeStart), planeSize, 0, outCn);
             }
         }
     };
@@ -216,13 +216,6 @@ public:
     }
 #endif
 
-    virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> >& inputs) CV_OVERRIDE
-    {
-#ifdef HAVE_VULKAN
-        return Ptr<BackendNode>(new VkComBackendNode(inputs, func.initVkCom()));
-#endif  // HAVE_VULKAN
-        return Ptr<BackendNode>();
-    }
 
     virtual bool tryFuse(Ptr<dnn::Layer>& top) CV_OVERRIDE
     {
@@ -275,7 +268,7 @@ public:
 
     void forwardSlice(const float* src, float* dst, int len, size_t planeSize, int cn0, int cn1) const CV_OVERRIDE
     {
-        func.apply(src, dst, len, planeSize, cn0, cn1);
+        func.apply(src, dst, -1, len, planeSize, cn0, cn1);
     }
 
 #ifdef HAVE_CUDA
@@ -359,12 +352,12 @@ struct ReLUFunctor : public BaseFunctor
         return backendId == DNN_BACKEND_OPENCV ||
                backendId == DNN_BACKEND_CUDA ||
                backendId == DNN_BACKEND_HALIDE ||
-               backendId == DNN_BACKEND_VKCOM ||
                backendId == DNN_BACKEND_CANN;
     }
 
-    void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
     {
+        CV_UNUSED(stripeStart);
         float s = slope;
         for( int cn = cn0; cn < cn1; cn++, srcptr += planeSize, dstptr += planeSize )
         {
@@ -514,14 +507,6 @@ struct ReLUFunctor : public BaseFunctor
     }
 #endif
 
-#ifdef HAVE_VULKAN
-    std::shared_ptr<vkcom::OpBase> initVkCom()
-    {
-        std::shared_ptr<vkcom::OpBase> op(new vkcom::OpReLU(slope));
-        return op;
-    }
-#endif  // HAVE_VULKAN
-
     bool tryQuantize(const std::vector<std::vector<float> > &scales,
                      const std::vector<std::vector<int> > &zeropoints, LayerParams& params)
     {
@@ -575,8 +560,9 @@ struct ReLU6Functor : public BaseFunctor
                backendId == DNN_BACKEND_CANN;
     }
 
-    void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
     {
+        CV_UNUSED(stripeStart);
         for( int cn = cn0; cn < cn1; cn++, srcptr += planeSize, dstptr += planeSize )
         {
             int i = 0;
@@ -706,14 +692,6 @@ struct ReLU6Functor : public BaseFunctor
     }
 #endif
 
-#ifdef HAVE_VULKAN
-    std::shared_ptr<vkcom::OpBase> initVkCom()
-    {
-        // TODO: add vkcom implementation
-        return std::shared_ptr<vkcom::OpBase>();
-    }
-#endif  // HAVE_VULKAN
-
     bool tryQuantize(const std::vector<std::vector<float> > &scales,
                      const std::vector<std::vector<int> > &zeropoints, LayerParams& params)
     {
@@ -728,8 +706,9 @@ struct ReLU6Functor : public BaseFunctor
 template <class T>
 struct BaseDefaultFunctor : public BaseFunctor
 {
-    void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
     {
+        CV_UNUSED(stripeStart);
         for( int cn = cn0; cn < cn1; cn++, srcptr += planeSize, dstptr += planeSize )
         {
             for( int i = 0; i < len; i++ )
@@ -830,14 +809,6 @@ struct BaseDefaultFunctor : public BaseFunctor
     }
 #endif
 
-#ifdef HAVE_VULKAN
-    std::shared_ptr<vkcom::OpBase> initVkCom()
-    {
-        // TODO: add vkcom implementation
-        return std::shared_ptr<vkcom::OpBase>();
-    }
-#endif  // HAVE_VULKAN
-
 private:
     static const char* const ocl_kernel_name;
 };
@@ -850,13 +821,20 @@ struct GeluFunctor : public BaseDefaultFunctor<GeluFunctor>
 
     bool supportBackend(int backendId, int)
     {
-        return backendId == DNN_BACKEND_OPENCV;
+        return backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_CUDA;
     }
 
     inline float calculate(float x) const
     {
         return 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
     }
+
+#ifdef HAVE_CUDA
+    Ptr<BackendNode> initCUDA(int target, csl::Stream stream)
+    {
+        return make_cuda_node<cuda4dnn::GeluOp>(target, stream);
+    }
+#endif
 
     int64 getFLOPSPerElement() const { return 100; }
 };
@@ -1132,7 +1110,14 @@ struct SigmoidFunctor : public BaseDefaultFunctor<SigmoidFunctor>
 
     inline float calculate(float x) const
     {
-        return 1.f / (1.f + exp(-x));
+        float y;
+        if (x >= 0)
+            y = 1.f / (1.f + exp(-x));
+        else {
+            y = exp(x);
+            y = y / (1 + y);
+        }
+        return y;
     }
 
 #ifdef HAVE_CUDA
@@ -2251,8 +2236,9 @@ struct PowerFunctor : public BaseFunctor
         shift = originShift;
     }
 
-    void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
     {
+        CV_UNUSED(stripeStart);
         float a = scale, b = shift, p = power;
         if( p == 1.f )
         {
@@ -2371,14 +2357,6 @@ struct PowerFunctor : public BaseFunctor
     }
 #endif
 
-#ifdef HAVE_VULKAN
-    std::shared_ptr<vkcom::OpBase> initVkCom()
-    {
-        // TODO: add vkcom implementation
-        return std::shared_ptr<vkcom::OpBase>();
-    }
-#endif  // HAVE_VULKAN
-
     bool tryFuse(Ptr<dnn::Layer>& top)
     {
         if (power != 1.0f && shift != 0.0f)
@@ -2485,6 +2463,7 @@ struct ChannelsPReLUFunctor : public BaseFunctor
     Mat scale;
 #ifdef HAVE_OPENCL
     UMat scale_umat;
+    std::string oclKernelName = "ChannelsPReLUForward";
 #endif
 
     explicit ChannelsPReLUFunctor(const Mat& scale_=Mat()) : scale(scale_)
@@ -2503,8 +2482,9 @@ struct ChannelsPReLUFunctor : public BaseFunctor
                backendId == DNN_BACKEND_CANN;
     }
 
-    void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
     {
+        CV_UNUSED(stripeStart);
         CV_Assert(scale.isContinuous() && scale.type() == CV_32F);
 
         const float* scaleptr = scale.ptr<float>();
@@ -2558,7 +2538,7 @@ struct ChannelsPReLUFunctor : public BaseFunctor
             UMat& src = inputs[i];
             UMat& dst = outputs[i];
 
-            ocl::Kernel kernel("PReLUForward", ocl::dnn::activations_oclsrc, buildopt);
+            ocl::Kernel kernel(oclKernelName.c_str(), ocl::dnn::activations_oclsrc, buildopt);
             kernel.set(0, (int)src.total());
             kernel.set(1, (int)src.size[1]);
             kernel.set(2, (int)total(shape(src), 2));
@@ -2635,15 +2615,76 @@ struct ChannelsPReLUFunctor : public BaseFunctor
     }
 #endif
 
-#ifdef HAVE_VULKAN
-    std::shared_ptr<vkcom::OpBase> initVkCom()
-    {
-        // TODO: add vkcom implementation
-        return std::shared_ptr<vkcom::OpBase>();
-    }
-#endif  // HAVE_VULKAN
-
     int64 getFLOPSPerElement() const { return 1; }
+};
+
+struct PReLUFunctor : public ChannelsPReLUFunctor
+{
+    explicit PReLUFunctor(const Mat& scale_=Mat()) : ChannelsPReLUFunctor(scale_)
+    {
+#ifdef HAVE_OPENCL
+        oclKernelName = "PReLUForward";
+#endif
+    }
+
+    bool supportBackend(int backendId, int)
+    {
+        return backendId == DNN_BACKEND_OPENCV ||
+               backendId == DNN_BACKEND_CANN ||
+               backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH;
+    }
+
+    void apply(const float* srcptr, float* dstptr, int stripeStart, int len, size_t planeSize, int cn0, int cn1) const
+    {
+        CV_UNUSED(stripeStart);
+        CV_Assert(scale.isContinuous() && scale.type() == CV_32F);
+
+        if (stripeStart < 0)
+            CV_Error(Error::StsNotImplemented, "PReLUFunctor requires stripe offset parameter");
+
+        const float* scaleptr = scale.ptr<float>() + cn0 * planeSize + stripeStart;
+        for( int cn = cn0; cn < cn1; cn++, srcptr += planeSize, dstptr += planeSize, scaleptr += planeSize )
+        {
+            int i = 0;
+        #if CV_SIMD128
+            v_float32x4 z = v_setzero_f32();
+            for( ; i <= len - 16; i += 16 )
+            {
+                v_float32x4 x0 = v_load(srcptr + i);
+                v_float32x4 x1 = v_load(srcptr + i + 4);
+                v_float32x4 x2 = v_load(srcptr + i + 8);
+                v_float32x4 x3 = v_load(srcptr + i + 12);
+                v_float32x4 s0 = v_load(scaleptr + i);
+                v_float32x4 s1 = v_load(scaleptr + i + 4);
+                v_float32x4 s2 = v_load(scaleptr + i + 8);
+                v_float32x4 s3 = v_load(scaleptr + i + 12);
+                x0 = v_select(x0 >= z, x0, x0*s0);
+                x1 = v_select(x1 >= z, x1, x1*s1);
+                x2 = v_select(x2 >= z, x2, x2*s2);
+                x3 = v_select(x3 >= z, x3, x3*s3);
+                v_store(dstptr + i, x0);
+                v_store(dstptr + i + 4, x1);
+                v_store(dstptr + i + 8, x2);
+                v_store(dstptr + i + 12, x3);
+            }
+        #endif
+            for( ; i < len; i++ )
+            {
+                float x = srcptr[i];
+                float s = scaleptr[i];
+                dstptr[i] = x >= 0.f ? x : s*x;
+            }
+        }
+    }
+
+#ifdef HAVE_DNN_NGRAPH
+    std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
+    {
+        auto shape = getShape<size_t>(scale);
+        auto slope = std::make_shared<ngraph::op::Constant>(ngraph::element::f32, shape, scale.ptr<float>());
+        return std::make_shared<ngraph::op::PRelu>(node, slope);
+    }
+#endif  // HAVE_DNN_NGRAPH
 };
 
 struct SignFunctor : public BaseDefaultFunctor<SignFunctor>
@@ -3081,13 +3122,26 @@ Ptr<ExpLayer> ExpLayer::create(const LayerParams& params)
 Ptr<Layer> ChannelsPReLULayer::create(const LayerParams& params)
 {
     CV_Assert(params.blobs.size() == 1);
-    if (params.blobs[0].total() == 1)
+    Mat scale = params.blobs[0];
+    float slope = *scale.ptr<float>();
+    if (scale.total() == 1 || countNonZero(scale != slope) == 0)
     {
         LayerParams reluParams = params;
-        reluParams.set("negative_slope", *params.blobs[0].ptr<float>());
+        reluParams.set("negative_slope", slope);
         return ReLULayer::create(reluParams);
     }
-    Ptr<ChannelsPReLULayer> l(new ElementWiseLayer<ChannelsPReLUFunctor>(ChannelsPReLUFunctor(params.blobs[0])));
+
+    Ptr<Layer> l;
+    // Check first two dimensions of scale (batch, channels)
+    MatShape scaleShape = shape(scale);
+    if (std::count_if(scaleShape.begin(), scaleShape.end(), [](int d){ return d != 1;}) > 1)
+    {
+        l = new ElementWiseLayer<PReLUFunctor>(PReLUFunctor(scale));
+    }
+    else
+    {
+        l = new ElementWiseLayer<ChannelsPReLUFunctor>(ChannelsPReLUFunctor(scale));
+    }
     l->setParamsFrom(params);
 
     return l;

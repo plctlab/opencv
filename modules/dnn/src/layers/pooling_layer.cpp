@@ -182,10 +182,10 @@ public:
         if (inputs[0].dims == 3)
         {
             // Pool1D
-            kernel_size.assign(1, kernel_size[0]);
-            strides.assign(1, strides[0]);
-            pads_begin.assign(1, pads_begin[0]);
-            pads_end.assign(1, pads_end[0]);
+            kernel_size.resize(1, kernel_size[0]);
+            strides.resize(1, strides[0]);
+            pads_begin.resize(1, pads_begin[0]);
+            pads_end.resize(1, pads_end[0]);
         }
 
 #ifdef HAVE_OPENCL
@@ -209,13 +209,13 @@ public:
 #ifdef HAVE_INF_ENGINE
         if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
         {
-            return !computeMaxIdx && type != STOCHASTIC && kernel_size.size() > 1 && (kernel_size.size() != 3 || !isArmComputePlugin());
+            return type != STOCHASTIC && kernel_size.size() > 1 && (kernel_size.size() != 3 || !isArmComputePlugin());
         }
 #endif
         if (backendId == DNN_BACKEND_OPENCV)
         {
             if (kernel_size.size() == 3)
-                return preferableTarget == DNN_TARGET_CPU;
+                return IS_DNN_CPU_TARGET(preferableTarget);
             if (kernel_size.size() <= 2)
                 return true;
             else
@@ -226,13 +226,6 @@ public:
             if (kernel_size.empty() || kernel_size.size() == 2)
                 return haveHalide() &&
                        (type == MAX || (type == AVE && !pads_begin[0] && !pads_begin[1] && !pads_end[0] && !pads_end[1]));
-        }
-        else if (backendId == DNN_BACKEND_VKCOM)
-        {
-            if (kernel_size.empty() || kernel_size.size() == 2)
-                return haveVulkan() &&
-                           (type == MAX || type == AVE);
-            return false;
         }
         else if (backendId == DNN_BACKEND_WEBNN)
         {
@@ -501,42 +494,6 @@ public:
     }
 #endif
 
-
-#ifdef HAVE_VULKAN
-    virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
-    {
-        int padding_mode;
-        vkcom::PoolType pool_type;
-        int filter_size[2] = {static_cast<int>(kernel_size[0]), static_cast<int>(kernel_size[1])};
-        int pad_size[2] = {static_cast<int>(pads_begin[0]), static_cast<int>(pads_begin[1])};
-        int stride_size[2] = {static_cast<int>(strides[0]), static_cast<int>(strides[1])};
-        pool_type = type == MAX ? vkcom::kPoolTypeMax:
-                   (type == AVE ? vkcom::kPoolTypeAvg:
-                            vkcom::kPoolTypeNum);
-
-        if (padMode.empty())
-        {
-            padding_mode = vkcom::kPaddingModeCaffe;
-        }
-        else if (padMode == "VALID")
-        {
-            padding_mode = vkcom::kPaddingModeValid;
-        }
-        else if (padMode == "SAME")
-        {
-            padding_mode = vkcom::kPaddingModeSame;
-        }
-        else
-            CV_Error(Error::StsError, "Unsupported padding mode " + padMode);
-
-        std::shared_ptr<vkcom::OpBase> op(new vkcom::OpPool(filter_size, pad_size,
-                                                            stride_size, padding_mode,
-                                                            pool_type, avePoolPaddedArea));
-        return Ptr<BackendNode>(new VkComBackendNode(inputs, op));
-    }
-#endif
-
-
     virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
     {
         if (type == MAX)
@@ -656,9 +613,17 @@ public:
             return Ptr<BackendNode>(new InfEngineNgraphNode(reduce_sum));
         }
         else if (type == MAX) {
-            auto max_pool = std::make_shared<ngraph::op::v1::MaxPool>(ieInpNode, ngraph::Strides(strides),
-                            ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
-                            rounding_type, pad_type);
+            std::shared_ptr<ngraph::Node> max_pool;
+            if (computeMaxIdx) {
+                std::vector<size_t> dilations(kernel_size.size(), 1);
+                max_pool = std::make_shared<ngraph::op::v8::MaxPool>(ieInpNode, ngraph::Strides(strides), ngraph::Strides(dilations),
+                                ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
+                                rounding_type, pad_type);
+            } else {
+                max_pool = std::make_shared<ngraph::op::v1::MaxPool>(ieInpNode, ngraph::Strides(strides),
+                                ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
+                                rounding_type, pad_type);
+            }
             return Ptr<BackendNode>(new InfEngineNgraphNode(max_pool));
         }
         else if (type == ROI) {

@@ -196,7 +196,7 @@ TEST_P(videoio_container, read)
             file.write(reinterpret_cast<char*>(raw_data.data), size);
             ASSERT_FALSE(file.fail());
         }
-        ASSERT_GE(totalBytes, (size_t)65536) << "Encoded stream is too small";
+        ASSERT_GE(totalBytes, (size_t)39775) << "Encoded stream is too small";
     }
 
     std::cout << "Checking extracted video stream: " << fileNameOut << " (size: " << totalBytes << " bytes)" << std::endl;
@@ -226,6 +226,7 @@ const videoio_container_params_t videoio_container_params[] =
     videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "h264", "h264", "h264", "I420"),
     videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "h265", "h265", "hevc", "I420"),
     videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "mjpg.avi", "mjpg", "MJPG", "I420"),
+    videoio_container_params_t(CAP_FFMPEG, "video/sample_322x242_15frames.yuv420p.libx264", "mp4", "h264", "h264", "I420")
     //videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "h264.mkv", "mkv.h264", "h264", "I420"),
     //videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "h265.mkv", "mkv.h265", "hevc", "I420"),
     //videoio_container_params_t(CAP_FFMPEG, "video/big_buck_bunny", "h264.mp4", "mp4.avc1", "avc1", "I420"),
@@ -447,10 +448,16 @@ TEST_P(ffmpeg_get_fourcc, check_short_codecs)
 const ffmpeg_get_fourcc_param_t ffmpeg_get_fourcc_param[] =
 {
     ffmpeg_get_fourcc_param_t("../cv/tracking/faceocc2/data/faceocc2.webm", "VP80"),
-    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libvpx-vp9.mp4", "vp09"),
-    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libaom-av1.mp4", "av01"),
     ffmpeg_get_fourcc_param_t("video/big_buck_bunny.h265", "hevc"),
-    ffmpeg_get_fourcc_param_t("video/big_buck_bunny.h264", "h264")
+    ffmpeg_get_fourcc_param_t("video/big_buck_bunny.h264", "h264"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libvpx-vp9.mp4", "VP90"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libaom-av1.mp4", "AV01"),
+    ffmpeg_get_fourcc_param_t("video/big_buck_bunny.mp4", "FMP4"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.mpeg2video.mp4", "mpg2"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.mjpeg.mp4", "MJPG"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libxvid.mp4", "FMP4"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libx265.mp4", "hevc"),
+    ffmpeg_get_fourcc_param_t("video/sample_322x242_15frames.yuv420p.libx264.mp4", "h264")
 };
 
 INSTANTIATE_TEST_CASE_P(videoio, ffmpeg_get_fourcc, testing::ValuesIn(ffmpeg_get_fourcc_param));
@@ -469,6 +476,16 @@ static void ffmpeg_check_read_raw(VideoCapture& cap)
     EXPECT_EQ(CV_8UC1, data.type()) << "CV_8UC1 != " << typeToString(data.type());
     EXPECT_TRUE(data.rows == 1 || data.cols == 1) << data.size;
     EXPECT_EQ((size_t)37118, data.total());
+
+#ifndef WIN32
+    // 12 is the nearset key frame to frame 18
+    EXPECT_TRUE(cap.set(CAP_PROP_POS_FRAMES, 18.));
+    EXPECT_EQ(cap.get(CAP_PROP_POS_FRAMES), 12.);
+    cap >> data;
+    EXPECT_EQ(CV_8UC1, data.type()) << "CV_8UC1 != " << typeToString(data.type());
+    EXPECT_TRUE(data.rows == 1 || data.cols == 1) << data.size;
+    EXPECT_EQ((size_t)8726, data.total());
+#endif
 }
 
 TEST(videoio_ffmpeg, ffmpeg_check_extra_data)
@@ -499,6 +516,16 @@ TEST(videoio_ffmpeg, open_with_property)
         CAP_PROP_FORMAT, -1  // demux only
     }));
 
+    // confirm properties are returned without initializing AVCodecContext
+    EXPECT_EQ(cap.get(CAP_PROP_FORMAT), -1);
+    EXPECT_EQ(static_cast<int>(cap.get(CAP_PROP_FOURCC)), fourccFromString("FMP4"));
+#ifndef WIN32
+    EXPECT_EQ(cap.get(CAP_PROP_N_THREADS), 0.0);
+#endif
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_HEIGHT), 384.0);
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_WIDTH), 672.0);
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_COUNT), 125);
+    EXPECT_EQ(cap.get(CAP_PROP_FPS), 24.0);
     ffmpeg_check_read_raw(cap);
 }
 
@@ -512,6 +539,16 @@ TEST(videoio_ffmpeg, create_with_property)
         CAP_PROP_FORMAT, -1  // demux only
     });
 
+    // confirm properties are returned without initializing AVCodecContext
+    EXPECT_TRUE(cap.get(CAP_PROP_FORMAT) == -1);
+    EXPECT_EQ(static_cast<int>(cap.get(CAP_PROP_FOURCC)), fourccFromString("FMP4"));
+#ifndef WIN32
+    EXPECT_EQ(cap.get(CAP_PROP_N_THREADS), 0.0);
+#endif
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_HEIGHT), 384.0);
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_WIDTH), 672.0);
+    EXPECT_EQ(cap.get(CAP_PROP_FRAME_COUNT), 125);
+    EXPECT_EQ(cap.get(CAP_PROP_FPS), 24.0);
     ffmpeg_check_read_raw(cap);
 }
 

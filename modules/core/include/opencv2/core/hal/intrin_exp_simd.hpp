@@ -141,7 +141,8 @@ inline auto v_lut_quads(const T* tab, const int* idx) {
 inline void v_cleanup() {}
 
 template<typename T>
-inline void v_store(T* dst, const stdx::native_simd<T>& v) {
+inline void v_store(T* dst, const stdx::native_simd<T>& v,
+                    hal::StoreMode /*mode*/=hal::STORE_UNALIGNED) {
     v.template copy_to(dst, stdx::element_aligned);
 }
 
@@ -193,7 +194,8 @@ inline void v_load_deinterleave(const T* ptr,
 template<typename T>
 inline void v_store_interleave(T* ptr,
                                const stdx::native_simd<T>& a,
-                               const stdx::native_simd<T>& b) {
+                               const stdx::native_simd<T>& b,
+                               hal::StoreMode /*mode*/=hal::STORE_UNALIGNED) {
     size_t i, i2;
     for(i = i2 = 0; i < a.size(); i++, i2 += 2) {
         ptr[i2] = a[i];
@@ -205,7 +207,8 @@ template<typename T>
 inline void v_store_interleave(T* ptr,
                                const stdx::native_simd<T>& a,
                                const stdx::native_simd<T>& b,
-                               const stdx::native_simd<T>& c) {
+                               const stdx::native_simd<T>& c,
+                               hal::StoreMode /*mode*/=hal::STORE_UNALIGNED) {
     size_t i, i2;
     for(i = i2 = 0; i < a.size(); i++, i2 += 3) {
         ptr[i2] = a[i];
@@ -219,7 +222,8 @@ inline void v_store_interleave(T* ptr,
                                const stdx::native_simd<T>& a,
                                const stdx::native_simd<T>& b,
                                const stdx::native_simd<T>& c,
-                               const stdx::native_simd<T>& d) {
+                               const stdx::native_simd<T>& d,
+                               hal::StoreMode /*mode*/=hal::STORE_UNALIGNED) {
     size_t i, i2;
     for(i = i2 = 0; i < a.size(); i++, i2 += 4) {
         ptr[i2] = a[i];
@@ -367,6 +371,12 @@ OPENCV_HAL_IMPL_C_PACK_STORE(uint64, unsigned, pack, static_cast)
 OPENCV_HAL_IMPL_C_PACK_STORE(int64, int, pack, static_cast)
 OPENCV_HAL_IMPL_C_PACK_STORE(short, uchar, pack_u, saturate_cast)
 OPENCV_HAL_IMPL_C_PACK_STORE(int, ushort, pack_u, saturate_cast)
+
+inline void v_pack_store(float16_t* ptr, const stdx::native_simd<float>& v) {
+    for (size_t i = 0; i < v.size(); ++i) {
+        ptr[i] = float16_t(v[i]);
+    }
+}
 
 #define OPENCV_HAL_IMPL_C_RSHR_PACK_STORE(_Tp, _Tpn, pack_suffix, cast) \
 template<int shift>                                                     \
@@ -810,8 +820,13 @@ inline auto v_select(const stdx::native_simd<T>& mask, const stdx::native_simd<T
 }
 
 template<typename T>
-inline auto v_muladd(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+inline auto v_fma(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
     return stdx::fma(a, b, c);
+}
+
+template<typename T>
+inline auto v_muladd(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+    return v_fma(a, b, c);
 }
 
 template<typename T>

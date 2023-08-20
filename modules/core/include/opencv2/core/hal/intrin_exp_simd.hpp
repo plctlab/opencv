@@ -359,7 +359,7 @@ OPENCV_HAL_IMPL_C_RSHR_PACK(int, ushort, pack_u, saturate_cast)
 
 #define OPENCV_HAL_IMPL_C_PACK_STORE(_Tp, _Tpn, pack_suffix, cast) \
 inline void v_##pack_suffix##_store(_Tpn* ptr, const stdx::native_simd<_Tp>& a) { \
-    for (size_t i = 0; i < a.size(); i++ ) \
+    for (size_t i = 0; i < a.size(); ++i) \
         ptr[i] = cast<_Tpn>(a[i]); \
 }
 
@@ -478,7 +478,7 @@ inline auto v_trunc(const stdx::native_simd<double>& a) {
 }
 
 inline auto v_cvt_f32(const stdx::native_simd<int>& a) {
-    return stdx::native_simd<float>([&](size_t i) { return float(a[i]); });
+    return stdx::static_simd_cast<stdx::native_simd<float>>(a);
 }
 
 inline auto v_cvt_f32(const stdx::native_simd<double>& a) {
@@ -506,7 +506,7 @@ inline auto v_cvt_f64_high(const stdx::native_simd<float>& a) {
 }
 
 inline auto v_cvt_f64(const stdx::native_simd<int64>& a) {
-    return stdx::native_simd<double>([&](size_t i) { return double(a[i]); });
+    return stdx::static_simd_cast<stdx::native_simd<double>>(a);
 }
 
 template<typename T>
@@ -535,7 +535,6 @@ inline bool v_check_any(const stdx::native_simd<T>& a) {
     return stdx::any_of(reinterpret_cast<const stdx::native_simd<typename V_TypeTraits<T>::int_type>&>(a) < 0);
 }
 
-
 template<typename T>
 inline auto v_add_wrap(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) {
     return a + b;
@@ -543,12 +542,20 @@ inline auto v_add_wrap(const stdx::native_simd<T>& a, const stdx::native_simd<T>
 
 template<typename T>
 inline auto v_add(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) {
-    return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] + b[i]); });
+    if constexpr (std::is_same_v<decltype(a[0] + b[0]), T>) {
+        return a + b;
+    } else {
+        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] + b[i]); });
+    }
 }
 
 template<typename T>
 inline auto v_add(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
-    return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] + b[i] + c[i]); });
+    if constexpr (std::is_same_v<decltype(a[0] + b[0] + c[0]), T>) {
+        return a + b + c;
+    } else {
+        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] + b[i] + c[i]); });
+    }
 }
 
 template<typename T>
@@ -558,7 +565,11 @@ inline auto v_sub_wrap(const stdx::native_simd<T>& a, const stdx::native_simd<T>
 
 template<typename T>
 inline auto v_sub(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) {
-    return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] - b[i]); });
+    if constexpr (std::is_same_v<decltype(a[0] - b[0]), T>) {
+        return a - b;
+    } else {
+        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] - b[i]); });
+    }
 }
 
 template<typename T>
@@ -574,12 +585,20 @@ inline auto v_mul_hi(const stdx::native_simd<T>& a, const stdx::native_simd<T>& 
 
 template<typename T>
 inline auto v_mul(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) {
-    return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] * b[i]); });
+    if constexpr (std::is_same_v<decltype(a[0] * b[0]), T>) {
+        return a * b;
+    } else {
+        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] * b[i]); });
+    }
 }
 
 template<typename T>
 inline auto v_mul(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
-    return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] * b[i] * c[i]); });
+    if constexpr (std::is_same_v<decltype(a[0] * b[0] * c[0]), T>) {
+        return a * b * c;
+    } else {
+        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] * b[i] * c[i]); });
+    }
 }
 
 template<typename T>
@@ -765,10 +784,14 @@ inline auto v_absdiff(const stdx::native_simd<T>& a, const stdx::native_simd<T>&
 
 template<typename T>
 inline auto v_absdiffs(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) {
-    if constexpr (std::is_unsigned_v<T>) { // according to the doc this branch is unreachable, but it is reached
+    if constexpr (std::is_unsigned_v<T>) { // according to the doc this branch is unreachable, but it is reached anyway
         return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] > b[i] ? a[i] - b[i] : b[i] - a[i]); });
     } else {
-        return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(std::abs(a[i] - b[i])); });
+        if constexpr (std::is_same_v<decltype(std::abs(a[0] - b[0])), T>) {
+            return stdx::abs(a - b);
+        } else {
+            return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(std::abs(a[i] - b[i])); });
+        }
     }
 }
 

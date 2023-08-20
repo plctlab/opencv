@@ -426,7 +426,7 @@ inline auto v_pack_b(const stdx::native_simd<uint64>& a, const stdx::native_simd
 }
 
 template<typename T>
-inline stdx::native_simd<T> v_pack_triplets(const stdx::native_simd<T>& a) {
+inline auto v_pack_triplets(const stdx::native_simd<T>& a) {
     stdx::native_simd<T> c;
     for (size_t i = 0; i < a.size()/4; i++) {
         c[3*i  ] = a[4*i  ];
@@ -547,7 +547,7 @@ inline auto v_add(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) 
 }
 
 template<typename T>
-inline auto v_add(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+inline auto v_add(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
     return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] + b[i] + c[i]); });
 }
 
@@ -578,7 +578,7 @@ inline auto v_mul(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b) 
 }
 
 template<typename T>
-inline auto v_mul(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+inline auto v_mul(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
     return stdx::native_simd<T>([&](size_t i) { return saturate_cast<T>(a[i] * b[i] * c[i]); });
 }
 
@@ -740,12 +740,12 @@ inline auto v_invsqrt(const stdx::native_simd<T>& a) {
 }
 
 template<int n, typename T>
-inline auto v_shl(stdx::native_simd<T> a) {
+inline auto v_shl(const stdx::native_simd<T>& a) {
     return a << n;
 }
 
 template<int n, typename T>
-inline auto v_shr(stdx::native_simd<T> a) {
+inline auto v_shr(const stdx::native_simd<T>& a) {
     return a >> n;
 }
 
@@ -820,12 +820,12 @@ inline auto v_select(const stdx::native_simd<T>& mask, const stdx::native_simd<T
 }
 
 template<typename T>
-inline auto v_fma(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+inline auto v_fma(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
     return stdx::fma(a, b, c);
 }
 
 template<typename T>
-inline auto v_muladd(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, stdx::native_simd<T> c) {
+inline auto v_muladd(const stdx::native_simd<T>& a, const stdx::native_simd<T>& b, const stdx::native_simd<T>& c) {
     return v_fma(a, b, c);
 }
 

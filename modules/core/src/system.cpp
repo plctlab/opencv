@@ -429,6 +429,8 @@ struct HWFeatures
 
         g_hwFeatureNames[CPU_LSX]  = "LSX";
         g_hwFeatureNames[CPU_LASX] = "LASX";
+
+        g_hwFeatureNames[CPU_EXP_SIMD] = "EXP_SIMD";
     }
 
     void initialize(void)
@@ -710,6 +712,10 @@ struct HWFeatures
 
     #if defined __loongarch_asx
         have[CV_CPU_LASX] = true;
+    #endif
+
+    #if __cplusplus >= 201703L && __has_include(<experimental/simd>)
+        have[CV_CPU_EXP_SIMD] = true;
     #endif
 
         bool skip_baseline_check = false;

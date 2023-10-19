@@ -284,6 +284,8 @@ namespace cv {
 #define CV_CPU_LSX              230
 #define CV_CPU_LASX             231
 
+#define CV_CPU_EXP_SIMD         250
+
 // CPU features groups
 #define CV_CPU_AVX512_SKX       256
 #define CV_CPU_AVX512_COMMON    257
@@ -345,6 +347,8 @@ enum CpuFeatures {
 
     CPU_LSX             = 230,
     CPU_LASX            = 231,
+
+    CPU_EXP_SIMD         = 250,
 
     CPU_AVX512_SKX      = 256, //!< Skylake-X with AVX-512F/CD/BW/DQ/VL
     CPU_AVX512_COMMON   = 257, //!< Common instructions AVX-512F/CD for all CPUs that support AVX-512

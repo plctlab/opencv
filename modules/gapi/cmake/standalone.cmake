@@ -43,7 +43,7 @@ target_compile_definitions(${FLUID_TARGET} PUBLIC GAPI_STANDALONE
                                            PUBLIC cv=fluidcv)
 
 set_target_properties(${FLUID_TARGET} PROPERTIES POSITION_INDEPENDENT_CODE True)
-set_property(TARGET ${FLUID_TARGET} PROPERTY CXX_STANDARD 11)
+set_property(TARGET ${FLUID_TARGET} PROPERTY CXX_STANDARD 17)
 
 if(MSVC)
   target_compile_options(${FLUID_TARGET} PUBLIC "/wd4251")
